@@ -5,7 +5,7 @@ import Prelude hiding (putStrLn)
 import System.Environment (getArgs)
 import qualified Data.Text.Lazy as T
 
-import TJ
+import TJ.Parser
 
 main = do
     args <- getArgs

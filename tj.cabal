@@ -48,7 +48,8 @@ cabal-version:       >=1.10
 
 library
   -- Modules exported by the library.
-  exposed-modules:     TJ
+  exposed-modules:     TJ.Parser
+                     , TJ.TypeChecker
   
   -- Modules included in this library but not exported.
   -- other-modules:       
@@ -61,8 +62,9 @@ library
   -- Other library packages from which modules are imported.
   build-depends:       base >=4.7 && <4.8
                      , parsec >= 3.1.2
-                     , text >= 1.1.0.0
-                     , mtl >= 2.1.0.0
+                     , text >= 1.1
+                     , mtl >= 2.1
+                     , containers >= 0.5
   
   -- Directories containing source files.
   hs-source-dirs:      lib

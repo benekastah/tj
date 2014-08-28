@@ -1,4 +1,10 @@
-module TJ (parseTJ) where
+module TJ.Parser ( parseTJ
+                 , Assignment(..)
+                 , Expression(..)
+                 , Identifier(..)
+                 , Operation(..)
+                 , Statement(..)
+                 ) where
 
 import Control.Monad.Identity
 import Text.Parsec.Char
@@ -14,30 +20,32 @@ type LanguageDef st = P.GenLanguageDef T.Text st Identity
 type TokenParser st = P.GenTokenParser T.Text st Identity
 
 newtype Identifier = Identifier T.Text
-                  deriving (Show)
+                  deriving (Show, Ord, Eq)
 
 type ParamList = [Identifier]
 type ArgList = [Expression]
 
-data Function = Function Identifier ParamList Expression
-              | Lambda ParamList Expression
-                deriving (Show)
-
 data Expression = EIdentifier Identifier
                 | ENumber Double
+                | EString T.Text
                 | EBlock [Expression]
-                | EFunction Function
+                | EFunction (Maybe Identifier) ParamList Expression
                 | EBinOp Operation Expression Expression
                 | EApplication Expression ArgList
-                | EAssignment Assignment
-                  deriving (Show)
+                | EStatement Statement
+                  deriving (Show, Ord, Eq)
 
 data Operation = Add | Subtract | Divide | Multiply
-                 deriving (Show)
+                 deriving (Show, Ord, Eq)
 
 data Assignment = Let Identifier Expression
-                | Defun Identifier Function
-                  deriving (Show)
+                  deriving (Show, Ord, Eq)
+
+type Module = [Statement]
+
+data Statement = SAssignment Assignment
+               | SModule Module
+               deriving (Show, Ord, Eq)
 
 -- Utility parsers
 expr :: (a -> Expression) -> Parser a -> Parser Expression
@@ -72,12 +80,12 @@ commaSep = P.commaSep lexer
 commaSep1 = P.commaSep1 lexer
 semi = P.semi lexer
 
-module' :: Parser [Assignment]
+module' :: Parser Module
 module' = do
     spaces
     ids <- assignment `sepEndBy` semi
     eof
-    return ids
+    return $ map SAssignment ids
 
 defun :: Parser Assignment
 defun = do
@@ -85,7 +93,7 @@ defun = do
     name <- identifier
     params <- paramList
     expr <- expression
-    return $ Defun name $ Function name params expr
+    return $ Let name $ EFunction (Just name) params expr
 
 let' :: Parser Assignment
 let' = do
@@ -97,14 +105,12 @@ let' = do
 
 assignment = try let' <|> defun
 
-function :: Parser Function
+function :: Parser Expression
 function = do
     reserved "function"
     params <- paramList
     expr <- expression
-    return $ Lambda params expr
-
-efunction = expr EFunction function
+    return $ EFunction Nothing params expr
 
 paramList :: Parser ParamList
 paramList = parens $ commaSep identifier
@@ -114,17 +120,23 @@ argList = parens $ commaSep expression
 
 block :: Parser Expression
 block = do
-    exprs <- braces $ (expression <|> expr EAssignment assignment) `sepEndBy` semi
+    exprs <- braces $ (expression <|> expr (EStatement . SAssignment) assignment) `sepEndBy` semi
     return $ EBlock exprs
 
 application :: Parser Expression
 application = do
     expr <- atom
     argsSets <- many1 argList
-    return $ foldr (\args expr -> EApplication expr args) expr argsSets
+    return $ foldr (\args expr -> EApplication expr args) expr
+                                                          (reverse argsSets)
+
+stringLiteral = do
+    s <- P.stringLiteral lexer
+    return $ EString $ T.pack s
 
 atom :: Parser Expression
 atom = choice $ map try [ number
+                        , stringLiteral
                         , eidentifier
                         , block
                         , parens expression
@@ -132,7 +144,7 @@ atom = choice $ map try [ number
 
 term :: Parser Expression
 term = choice $ map try [ application
-                        , efunction
+                        , function
                         , atom
                         ]
 
