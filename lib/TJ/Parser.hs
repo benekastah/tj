@@ -1,4 +1,5 @@
 module TJ.Parser ( parseTJ
+                 , parseTJFile
                  , Assignment(..)
                  , Expression(..)
                  , Identifier(..)
@@ -13,6 +14,7 @@ import Text.Parsec.Expr
 import Text.Parsec.Prim
 import Text.Parsec.Text.Lazy
 import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.IO as TextIO
 import qualified Text.Parsec.Char as C
 import qualified Text.Parsec.Token as P
 
@@ -80,12 +82,12 @@ commaSep = P.commaSep lexer
 commaSep1 = P.commaSep1 lexer
 semi = P.semi lexer
 
-module' :: Parser Module
+module' :: Parser Statement
 module' = do
     spaces
     ids <- assignment `sepEndBy` semi
     eof
-    return $ map SAssignment ids
+    return $ SModule $ map SAssignment ids
 
 defun :: Parser Assignment
 defun = do
@@ -177,3 +179,7 @@ number = do
         Right n -> n
 
 parseTJ input = parse module' "(unknown)" input
+
+parseTJFile file = do
+    input <- TextIO.readFile file
+    return $ parseTJ input

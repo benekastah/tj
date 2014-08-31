@@ -6,9 +6,13 @@ import System.Environment (getArgs)
 import qualified Data.Text.Lazy as T
 
 import TJ.Parser
+import TJ.TypeChecker
 
 main = do
     args <- getArgs
-    putStrLn $ case parseTJ (T.pack $ head args) of
-        Left err -> T.pack $ show err
-        Right parsed -> T.pack $ show parsed
+    parseResult <- parseTJFile (head args)
+    case parseResult of
+        Left err -> putStrLn $ T.pack $ show err
+        Right parsed -> do
+            putStrLn $ T.pack $ show parsed
+            putStrLn $ T.pack $ show $ checkStatement parsed

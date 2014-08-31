@@ -1,4 +1,7 @@
-module TJ.TypeChecker () where
+module TJ.TypeChecker ( check
+                      , checkStatement
+                      , checkExpression
+                      ) where
 
 import Control.Monad.State
 
@@ -9,149 +12,199 @@ import qualified Data.Set as Set
 import TJ.Parser
 
 data Type = TVariable Int
-          | TFunction [Type] Type
-          | TLabeled T.Text
+          | TLabeled T.Text [Type]
           deriving (Show, Eq, Ord)
 
 data Context = Context { env :: Map.Map Expression Type
                        , typeEnv :: Map.Map Type Type
                        , nonGeneric :: Set.Set Type
+                       , freshMap :: Map.Map Type Type
                        , uid :: Int
                        }
                deriving (Show)
 
 type TypeChecker = State Context
 
-voidType = TLabeled "Void"
-numberType = TLabeled "Number"
-stringType = TLabeled "String"
-
--- typeVar ctx = (TVariable (uid ctx), ctx')
---     where ctx' = ctx { uid = uid ctx + 1 }
+voidType = TLabeled "Void" []
+numberType = TLabeled "Number" []
+stringType = TLabeled "String" []
+functionType args ret = TLabeled "->" (ret:args)
 
 typeVar :: TypeChecker Type
 typeVar = do
-    n <- gets uid
-    put $ ctx { uid = n + 1}
-    TVariable n
-
--- typeVars :: Context -> [a] -> ([Type], Context)
--- typeVars ctx ls = foldr typeVar' ([], ctx) ls
---     where typeVar' _ (types, ctx) = let (t, ctx') = typeVar ctx
---                                     in (types ++ [t], ctx')
+    ctx <- get
+    put $ ctx { uid = (uid ctx) + 1}
+    return $ TVariable $ uid ctx
 
 typeVars :: [a] -> TypeChecker [Type]
 typeVars ls = mapM (\_ -> typeVar) ls
 
--- analyseList :: Context -> [Either Statement Expression] -> ([Type], Context)
--- analyseList ctx nodes = foldr analyse' ([], ctx) nodes
---     where analyse' node (types, ctx) = let (t, ctx') = analyse ctx node
---                                        in  (types ++ [t], ctx')
+scoped :: TypeChecker a -> TypeChecker a
+scoped fn = do
+    env' <- gets env
+    nonGeneric' <- gets nonGeneric
+    x <- fn
+    ctx' <- get
+    put $ ctx' { env = env', nonGeneric = nonGeneric' }
+    return x
 
-analyseList :: [Either Statement Expression] -> [Type]
-analyseList nodes = mapM analyse node
+errOrReturn errs ret =
+    case errs of
+        [] -> return ret
+        _ -> error $ unlines errs
 
-analyse :: Context -> Either Statement Expression -> (Type, Context)
-analyse ctx node =
+analyse :: Either Statement Expression -> TypeChecker Type
+analyse node =
     case node of
-        Left (SAssignment (Let ident expr)) ->
-            let (t, _) = analyse ctx $ Right expr
-            in  (t, ctx { env = Map.insert (EIdentifier ident) t (env ctx)})
-        Left (SModule mod) ->
-            let (_, ctx') = analyseList ctx $ map Left mod
-            in  (voidType, ctx')
+        Left (SAssignment (Let ident expr)) -> do
+            t <- analyse $ Right expr
+            ctx <- get
+            put ctx { env = Map.insert (EIdentifier ident) t (env ctx)}
+            return t
+        Left (SModule mod) -> do
+            t <- mapM analyse $ map Left mod
+            return $ TLabeled "Module" t
         Right e -> case e of
-            EIdentifier ident -> getType ctx e
-            EApplication fn args ->
-                let (retT, ctx') = typeVar ctx
-                    getTypeFold a (types, ctx) = let (t, ctx') = getType ctx a
-                                                 in  (types ++ [t], ctx')
-                    (argTypes, ctx'') = foldr getTypeFold ([], ctx') args
-                    (retT', ctx''') = analyse ctx'' $ Right fn
-                in  unify ctx''' (TFunction argTypes retT) retT'
-            EBinOp op e1 e2 ->
-                let (retT, ctx') = typeVar ctx
-                    args = [e1, e2]
-                    getTypeFold a (types, ctx) = let (t, ctx') = getType ctx a
-                                                 in  (types ++ [t], ctx')
-                    (argTypes, ctx'') = foldr getTypeFold ([], ctx') args
-                in  unify ctx'' (TFunction argTypes retT) (opType op)
-            EFunction _ args expr ->
-                let (argTypes, ctx') = typeVars ctx args
-                    envInsert env' (a, t) = Map.insert a t env'
-                    env' = foldl envInsert (env ctx')
-                                           (zip (map EIdentifier args) argTypes)
-                    nonGeneric' = Set.union (nonGeneric ctx') (Set.fromList argTypes)
-                    (retT, _) = analyse (ctx' { env = env', nonGeneric = nonGeneric' })
-                                        (Right expr)
-                in  (TFunction argTypes retT, ctx')
-            EBlock exprs ->
-                let (types, ctx') = analyseList ctx $ map Right exprs
-                in  (last types, ctx')
-            EStatement s -> analyse ctx (Left s)
-            _ -> getType ctx e
-
--- analyse :: Either Assignment Expression -> TypeChecker Type
--- analyse node = do
---     case node of
---         Left
+            EIdentifier ident -> getType e
+            EApplication fn args -> do
+                fnT <- analyse $ Right fn
+                argTypes <- mapM getType args
+                retT <- typeVar
+                errs <- unify (functionType argTypes retT) fnT
+                errOrReturn errs retT
+            EBinOp op e1 e2 -> do
+                let args = [e1, e2]
+                argTypes <- mapM getType args
+                retT <- typeVar
+                errs <- unify (functionType argTypes retT) (opType op)
+                errOrReturn errs retT
+            EFunction _ args expr -> scoped (do
+                argTypes <- typeVars args
+                ctx <- get
+                put $ ctx { env = foldr (\(a, t) env' -> Map.insert a t env')
+                                        (env ctx)
+                                        (zip (map EIdentifier args) argTypes)
+                          , nonGeneric = Set.union (nonGeneric ctx)
+                                                   (Set.fromList argTypes)
+                          }
+                retT <- analyse $ Right expr
+                return $ functionType argTypes retT
+                )
+            EBlock exprs -> scoped (do
+                types <- mapM analyse $ map Right exprs
+                return $ last types
+                )
+            EStatement s -> analyse (Left s)
+            _ -> getType e
 
 opType :: Operation -> Type
-opType op = TFunction [numberType, numberType] numberType
+opType op = functionType [numberType, numberType] numberType
 
-getType :: Context -> Expression -> (Type, Context)
-getType ctx node =
-    case Map.lookup node (env ctx) of
-        Just t -> fresh ctx t
+getType :: Expression -> TypeChecker Type
+getType node = do
+    env' <- gets env
+    case Map.lookup node env' of
+        Just t -> fresh t
         Nothing -> case node of
-            ENumber _ -> (numberType, ctx)
-            EString _ -> (stringType, ctx)
+            ENumber _ -> return numberType
+            EString _ -> return stringType
             _ -> error $ "Undefined: " ++ show node
 
-fresh ctx t = (t', ctx')
-    where
-        -- TODO The ctx'' vars in this function are sad. Make this nicer.
-        freshrec ctx m t =
-            let (p, ctx') = prune ctx t
-            in case p of
-                TVariable _ -> if isGeneric ctx' p
-                    then case Map.lookup p m of
-                        Just p' -> (p', ctx', m)
-                        Nothing -> let (tvar, ctx'') = typeVar ctx'
-                                   in  (tvar, ctx'', Map.insert p tvar m)
-                    else (p, ctx', m)
-                TLabeled name -> (TLabeled name, ctx', m)
-                TFunction args ret ->
-                    let (types, ctx'', m') = foldr freshfold ([], ctx', m) (ret:args)
-                    in  (TFunction (tail types) (head types), ctx'', m')
-        freshfold t (types, ctx, m) =
-            let (t', ctx', m') = freshrec ctx m t
-            in  (types ++ [t'], ctx', m')
-        (t', ctx', _) = freshrec ctx Map.empty t
+fresh :: Type -> TypeChecker Type
+fresh t = do
+    ctx <- get
+    put $ ctx { freshMap = Map.empty }
+    freshrec t
 
-prune ctx t =
+freshrec :: Type -> TypeChecker Type
+freshrec t = do
+    p <- prune t
+    m <- gets freshMap
+    case p of
+        TVariable _ -> do
+            gen <- isGeneric p
+            if gen
+                then case Map.lookup p m of
+                    Just p' -> return p'
+                    Nothing -> do
+                        tvar <- typeVar
+                        ctx <- get
+                        put $ ctx { freshMap = Map.insert p tvar m }
+                        return tvar
+                else return p
+        TLabeled name types -> do
+            types' <- mapM freshrec types
+            return $ TLabeled name types'
+
+prune :: Type -> TypeChecker Type
+prune t = do
+    tenv <- gets typeEnv
     case t of
-        TVariable _ -> case Map.lookup t (typeEnv ctx) of
-            Just inst ->
-                let (inst', ctx') = prune ctx inst
-                in  (inst', ctx { typeEnv = Map.insert t inst' (typeEnv ctx) })
-            Nothing -> (t, ctx)
-        _ -> (t, ctx)
+        TVariable _ -> case Map.lookup t tenv of
+            Just inst -> do
+                inst' <- prune inst
+                ctx <- get
+                put $ ctx { typeEnv = Map.insert t inst' tenv }
+                return inst'
+            Nothing -> return t
+        _ -> return t
 
-isGeneric ctx t = (not yn, ctx')
-    where (yn, ctx') = occursIn ctx (Set.toList $ nonGeneric ctx) t
+isGeneric :: Type -> TypeChecker Bool
+isGeneric t = do
+    ngen <- gets nonGeneric
+    occurs <- occursIn (Set.toList $ ngen) t
+    return $ not occurs
 
-occursIn ctx types t1 = foldr f (False, ctx) types
-    where f t2 (yn, ctx) = let (yn', ctx') = occursInType ctx t1 t2
-                           in  (or [yn, yn'], ctx')
+occursIn :: [Type] -> Type -> TypeChecker Bool
+occursIn types t1 = do
+    occurs <- mapM (occursInType t1) types
+    return $ or occurs
 
-occursInType ctx t1 t2 =
+occursInType :: Type -> Type -> TypeChecker Bool
+occursInType t1 t2 = do
+    p2 <- prune t2
     if p2 == t1
-        then (True, ctx')
+        then return True
         else case p2 of
-            TFunction args ret -> occursIn ctx' (ret:args)
-    where (p2, ctx') = prune ctx t2
+            TLabeled name types -> occursIn types t1
+            _ -> return False
 
--- TODO
-unify :: Context -> Type -> Type -> (Type, Context)
-unify ctx t1 t2 = (t1, ctx)
+unify :: Type -> Type -> TypeChecker [String]
+unify t1 t2 = do
+    p1 <- prune t1
+    p2 <- prune t2
+    case p1 of
+        TVariable n -> do
+            if p1 /= p2
+                then do
+                    occurs <- occursInType p1 p2
+                    if occurs
+                        then return $! ["recursive unification"]
+                        else do
+                            ctx <- get
+                            put $ ctx { typeEnv = Map.insert p1 p2 $ typeEnv ctx }
+                            return $! []
+                else return $! []
+        TLabeled name1 types1 -> case p2 of
+            TLabeled name2 types2 ->
+                if name1 /= name2 || (length types1) /= (length types2)
+                    then return $! ["Type mismatch: " ++ (show p1) ++ " != " ++
+                                 (show p2)]
+                    else do
+                        r <- mapM (\(a, b) -> unify a b) (zip types1 types2)
+                        return $! concat r
+            _ -> unify p2 p1
+
+emptyContext = Context { env = Map.empty
+                       , typeEnv = Map.empty
+                       , nonGeneric = Set.empty
+                       , freshMap = Map.empty
+                       , uid = 0
+                       }
+
+check :: Either Statement Expression -> Type
+check ast = evalState (analyse ast) emptyContext
+
+checkStatement = check . Left
+
+checkExpression = check . Right

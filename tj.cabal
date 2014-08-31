@@ -95,3 +95,5 @@ executable tj
   
   -- Base language which the package is written in.
   default-language:    Haskell2010
+
+-- vim: set ts=2 sts=2 sw=2: et
