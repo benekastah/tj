@@ -114,7 +114,9 @@ fresh :: Type -> TypeChecker Type
 fresh t = do
     ctx <- get
     put $ ctx { freshMap = Map.empty }
-    freshrec t
+    f <- freshrec t
+    put ctx { freshMap = freshMap ctx }
+    return f
 
 freshrec :: Type -> TypeChecker Type
 freshrec t = do
