@@ -10,11 +10,11 @@ import TJ.CodeGen
 import TJ.Parser
 import TJ.TypeChecker
 
-data Args = Args String String
+data Args = Args String (Maybe String)
 
 parseArgs [] = error "Too few arguments!"
-parseArgs (inf:[]) = Args inf (inf ++ ".js")
-parseArgs (inf:outf:[]) = Args inf outf
+parseArgs (inf:[]) = Args inf Nothing
+parseArgs (inf:outf:[]) = Args inf (Just outf)
 parseArgs _ = error "Too many arguments!"
 
 getParsedArgs = do
@@ -29,5 +29,9 @@ main = do
         Right parsed -> do
             putStrLn $ show $ checkStatement parsed
             let doc = renderPretty 0.4 80 $ jsDocument parsed
-            withFile out WriteMode (\h -> displayIO h doc)
-            putStrLn $ "Compiled " ++ src ++ " to " ++ out
+            let docOut h = displayIO h doc
+            case out of
+                Just outf -> do
+                    withFile outf WriteMode docOut
+                    putStrLn $ "Compiled " ++ src ++ " to " ++ outf
+                Nothing -> docOut stdout
