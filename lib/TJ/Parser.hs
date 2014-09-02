@@ -1,5 +1,6 @@
 module TJ.Parser ( parseTJ
                  , parseTJFile
+                 , identName
                  , Assignment(..)
                  , Expression(..)
                  , Identifier(..)
@@ -22,7 +23,12 @@ type LanguageDef st = P.GenLanguageDef T.Text st Identity
 type TokenParser st = P.GenTokenParser T.Text st Identity
 
 newtype Identifier = Identifier T.Text
-                  deriving (Show, Ord, Eq)
+                  deriving (Ord, Eq)
+
+identName (Identifier ident) = ident
+
+instance Show Identifier where
+    show (Identifier ident) = T.unpack ident
 
 type ParamList = [Identifier]
 type ArgList = [Expression]
@@ -30,7 +36,6 @@ type ArgList = [Expression]
 data Expression = EIdentifier Identifier
                 | ENumber Double
                 | EString T.Text
-                | EBlock [Expression]
                 | EFunction (Maybe Identifier) ParamList Expression
                 | EBinOp Operation Expression Expression
                 | EApplication Expression ArgList
@@ -38,7 +43,13 @@ data Expression = EIdentifier Identifier
                   deriving (Show, Ord, Eq)
 
 data Operation = Add | Subtract | Divide | Multiply
-                 deriving (Show, Ord, Eq)
+                 deriving (Ord, Eq)
+
+instance Show Operation where
+    show Add = "+"
+    show Subtract = "-"
+    show Divide = "/"
+    show Multiply = "*"
 
 data Assignment = Let Identifier Expression
                   deriving (Show, Ord, Eq)
@@ -47,7 +58,9 @@ type Module = [Statement]
 
 data Statement = SAssignment Assignment
                | SModule Module
-               deriving (Show, Ord, Eq)
+               | SReturn Expression
+               | SBlock [Expression]
+                 deriving (Show, Ord, Eq)
 
 -- Utility parsers
 expr :: (a -> Expression) -> Parser a -> Parser Expression
@@ -68,7 +81,7 @@ tjLangDef = P.LanguageDef {
     P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~",
     P.reservedNames  = ["let", "function"],
     P.reservedOpNames= [],
-    P.caseSensitive  = False
+    P.caseSensitive  = True
     }
 
 lexer :: TokenParser st
@@ -123,7 +136,7 @@ argList = parens $ commaSep expression
 block :: Parser Expression
 block = do
     exprs <- braces $ (expression <|> expr (EStatement . SAssignment) assignment) `sepEndBy` semi
-    return $ EBlock exprs
+    return $ EStatement $ SBlock exprs
 
 application :: Parser Expression
 application = do

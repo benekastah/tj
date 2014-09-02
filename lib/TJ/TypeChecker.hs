@@ -4,10 +4,10 @@ module TJ.TypeChecker ( check
                       ) where
 
 import Control.Monad.State
-
-import qualified Data.Text.Lazy as T
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+
+import qualified Data.Text.Lazy as T
 
 import TJ.Parser
 
@@ -64,6 +64,10 @@ analyse node =
         Left (SModule mod) -> do
             t <- mapM analyse $ map Left mod
             return $ TLabeled "Module" t
+        Left (SBlock exprs) -> scoped (do
+            types <- mapM analyse $ map Right exprs
+            return $ last (voidType:types)
+            )
         Right e -> case e of
             EIdentifier ident -> getType e
             EApplication fn args -> do
@@ -89,10 +93,6 @@ analyse node =
                           }
                 retT <- analyse $ Right expr
                 return $ functionType argTypes retT
-                )
-            EBlock exprs -> scoped (do
-                types <- mapM analyse $ map Right exprs
-                return $ last types
                 )
             EStatement s -> analyse (Left s)
             _ -> getType e

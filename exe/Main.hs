@@ -1,18 +1,33 @@
 module Main (main) where
 
-import Data.Text.Lazy.IO
-import Prelude hiding (putStrLn)
-import System.Environment (getArgs)
+-- import Data.Text.Lazy.IO
 import qualified Data.Text.Lazy as T
+import System.Environment (getArgs)
+import System.IO
+import Text.PrettyPrint.Leijen (displayIO, renderPretty)
 
+import TJ.CodeGen
 import TJ.Parser
 import TJ.TypeChecker
 
-main = do
+data Args = Args String String
+
+parseArgs [] = error "Too few arguments!"
+parseArgs (inf:[]) = Args inf (inf ++ ".js")
+parseArgs (inf:outf:[]) = Args inf outf
+parseArgs _ = error "Too many arguments!"
+
+getParsedArgs = do
     args <- getArgs
-    parseResult <- parseTJFile (head args)
+    return $ parseArgs args
+
+main = do
+    Args src out <- getParsedArgs
+    parseResult <- parseTJFile src
     case parseResult of
-        Left err -> putStrLn $ T.pack $ show err
+        Left err -> putStrLn $ show err
         Right parsed -> do
-            putStrLn $ T.pack $ show parsed
-            putStrLn $ T.pack $ show $ checkStatement parsed
+            putStrLn $ show $ checkStatement parsed
+            let doc = renderPretty 0.4 80 $ jsDocument parsed
+            withFile out WriteMode (\h -> displayIO h doc)
+            putStrLn $ "Compiled " ++ src ++ " to " ++ out
