@@ -100,8 +100,14 @@ analyse node =
             EStatement s -> analyse (Left s)
             _ -> getType e
 
+numericBinOp = functionType [numberType, numberType] numberType
+
 opType :: Operation -> Type
-opType op = functionType [numberType, numberType] numberType
+opType Add = numericBinOp
+opType Subtract = numericBinOp
+opType Multiply = numericBinOp
+opType Divide = numericBinOp
+opType Concat = functionType [stringType, stringType] stringType
 
 getType :: Expression -> TypeChecker Type
 getType node = do

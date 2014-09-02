@@ -42,7 +42,7 @@ data Expression = EIdentifier Identifier
                 | EStatement Statement
                   deriving (Show, Ord, Eq)
 
-data Operation = Add | Subtract | Divide | Multiply
+data Operation = Add | Subtract | Divide | Multiply | Concat
                  deriving (Ord, Eq)
 
 instance Show Operation where
@@ -50,6 +50,7 @@ instance Show Operation where
     show Subtract = "-"
     show Divide = "/"
     show Multiply = "*"
+    show Concat = "++"
 
 data Assignment = Let Identifier Expression
                   deriving (Show, Ord, Eq)
@@ -187,6 +188,7 @@ expr_table = [ [ binary "*" (EBinOp Multiply) AssocLeft
                , binary "/" (EBinOp Divide) AssocLeft ]
              , [ binary "+" (EBinOp Add) AssocLeft
                , binary "-" (EBinOp Subtract) AssocLeft ]
+             , [ binary "++" (EBinOp Concat) AssocLeft ]
              ]
 
 expression :: Parser Expression

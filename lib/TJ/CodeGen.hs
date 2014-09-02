@@ -116,7 +116,7 @@ jsify (Right ast) =
     case ast of
         EIdentifier ident -> return $ text $ show ident
         ENumber n -> return $ text $ show n
-        EString s -> return $ squotes $ text $ show s
+        EString s -> return $ text $ show s
         EFunction maybeIdent params expr -> scoped $ do
             ctx <- get
             put $ ctx { dumpVars = True
@@ -132,7 +132,10 @@ jsify (Right ast) =
         EBinOp op a b -> do
             a' <- jsifyExpression a
             b' <- jsifyExpression b
-            let docs = [a', text $ show op, b']
+            let opDoc = case op of
+                            Concat -> text "+"
+                            _ -> text $ show op
+            let docs = [a', opDoc, b']
             return $ parens $ hsep docs
         EApplication expr args -> do
             expr' <- jsifyExpression expr

@@ -5,10 +5,18 @@ function log(a) {
 
 function add(a, b) a + b;
 
+function test(a) {
+    let b = javascript { "6" };
+    log(a ++ b);
+    b
+};
+
 function main() {
     let a = {
         let b = 1 + 5;
         b * 4;
     };
-    log(add(a, 5))
+    log(add(a, 5));
+    let c = test("go\"rp");
+    log(add(a, c))
 };
