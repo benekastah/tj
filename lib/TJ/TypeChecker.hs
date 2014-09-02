@@ -68,11 +68,14 @@ analyse node =
             types <- mapM analyse $ map Right exprs
             return $ last (voidType:types)
             )
+        Left (SJavascript js) -> do
+            tvar <- typeVar
+            return tvar
         Right e -> case e of
             EIdentifier ident -> getType e
             EApplication fn args -> do
                 fnT <- analyse $ Right fn
-                argTypes <- mapM getType args
+                argTypes <- mapM (analyse . Right) args
                 retT <- typeVar
                 errs <- unify (functionType argTypes retT) fnT
                 errOrReturn errs retT

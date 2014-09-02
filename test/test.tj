@@ -1,11 +1,14 @@
 
+function log(a) {
+    javascript { console.log(a) }
+};
+
 function add(a, b) a + b;
 
 function main() {
     let a = {
         let b = 1 + 5;
-        b * 4
+        b * 4;
     };
-    a
+    log(add(a, 5))
 };
-

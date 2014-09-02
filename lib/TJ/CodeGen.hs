@@ -37,8 +37,10 @@ functionBlock expr = functionBlock $ EStatement $ SBlock [expr]
 assignment :: Bool -> Assignment -> CodeGen Doc
 assignment decl (Let ident expr) = do
     expr' <- jsifyExpression expr
+    ctx <- get
+    let decl' = decl && not (Set.member ident $ vars ctx)
     ident' <- registerIdent decl ident
-    return $ hsep [ text $ (if decl then "var " else "") ++ show ident
+    return $ hsep [ text $ (if decl' then "var " else "") ++ show ident
                   , text "="
                   , expr' ]
 
@@ -87,7 +89,8 @@ jsify (Left ast) =
         SAssignment assgn -> assignment True assgn
         SModule mod -> scoped $ do
             mod' <- mapM jsifyStatement mod
-            return $ semiDocfold (<$$>) mod'
+            let callMain = text "typeof main === 'function' && main();"
+            return $ (semiDocfold (<$$>) mod') <$$> callMain
         SReturn expr -> do
             expr' <- jsifyExpression expr
             return $ text "return" <+> expr'
@@ -107,6 +110,7 @@ jsify (Left ast) =
 
             let body = indent 4 $ semiDocfold (<$$>) $ docs'
             return $ braces $ line <> body
+        SJavascript js -> return $ text $ T.unpack js
 
 jsify (Right ast) =
     case ast of
@@ -115,7 +119,9 @@ jsify (Right ast) =
         EString s -> return $ squotes $ text $ show s
         EFunction maybeIdent params expr -> scoped $ do
             ctx <- get
-            put $ ctx { dumpVars = True }
+            put $ ctx { dumpVars = True
+                      , vars = foldr Set.insert (vars ctx) params
+                      }
             body <- jsifyStatement $ functionBlock expr
             let lsIdent = case maybeIdent of
                             Just ident -> [text $ show ident]

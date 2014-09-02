@@ -9,15 +9,15 @@ module TJ.Parser ( parseTJ
                  ) where
 
 import Control.Monad.Identity
+import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.IO as TextIO
+import qualified Text.Parsec.Char as C
+import qualified Text.Parsec.Token as P
 import Text.Parsec.Char
 import Text.Parsec.Combinator
 import Text.Parsec.Expr
 import Text.Parsec.Prim
 import Text.Parsec.Text.Lazy
-import qualified Data.Text.Lazy as T
-import qualified Data.Text.Lazy.IO as TextIO
-import qualified Text.Parsec.Char as C
-import qualified Text.Parsec.Token as P
 
 type LanguageDef st = P.GenLanguageDef T.Text st Identity
 type TokenParser st = P.GenTokenParser T.Text st Identity
@@ -60,6 +60,7 @@ data Statement = SAssignment Assignment
                | SModule Module
                | SReturn Expression
                | SBlock [Expression]
+               | SJavascript T.Text
                  deriving (Show, Ord, Eq)
 
 -- Utility parsers
@@ -79,7 +80,7 @@ tjLangDef = P.LanguageDef {
     P.identLetter    = alphaNum <|> oneOf "_'",
     P.opStart        = P.opLetter tjLangDef,
     P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~",
-    P.reservedNames  = ["let", "function"],
+    P.reservedNames  = ["let", "function", "javascript"],
     P.reservedOpNames= [],
     P.caseSensitive  = True
     }
@@ -135,8 +136,26 @@ argList = parens $ commaSep expression
 
 block :: Parser Expression
 block = do
-    exprs <- braces $ (expression <|> expr (EStatement . SAssignment) assignment) `sepEndBy` semi
+    let exprs = expression <|> expr (EStatement . SAssignment) assignment
+    exprs <- braces $ exprs `sepEndBy` semi
     return $ EStatement $ SBlock exprs
+
+jsInnerBlock t n = do
+    ch <- if n == 0
+        then (lookAhead $ try $ char '}') <|> anyChar
+        else anyChar
+    let n' = if ch == '{'
+        then n + 1
+        else n
+    if ch == '}' && n == 0
+        then return t
+        else jsInnerBlock (T.snoc t ch) (if ch == '{' then n + 1 else n)
+
+jsblock :: Parser Expression
+jsblock = do
+    reserved "javascript"
+    js <- braces $ jsInnerBlock T.empty 0
+    return $ EStatement $ SJavascript js
 
 application :: Parser Expression
 application = do
@@ -154,6 +173,7 @@ atom = choice $ map try [ number
                         , stringLiteral
                         , eidentifier
                         , block
+                        , jsblock
                         , parens expression
                         ]
 
