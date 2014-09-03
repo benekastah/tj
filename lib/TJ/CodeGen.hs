@@ -8,7 +8,7 @@ import qualified Data.Set as Set
 import Text.PrettyPrint.Leijen
 import qualified Data.Text.Lazy as T
 
-import TJ.Parser
+import TJ.Ast
 
 data Context = Context { vars :: Set.Set Identifier
                        , liftVars :: Set.Set Identifier
@@ -83,6 +83,13 @@ renameIdent ident n = do
             return ident'
         else renameIdent ident (n + 1)
 
+processEnumMembers (n, xs) (EnumConstant ident maybeExpr) =
+    case maybeExpr of
+        Just $ ENumber n' -> (n' + 1.0, (EnumConstant ident maybeExpr):xs)
+        Nothing -> (n + 1.0, (EnumConstant ident $ Just $ ENumber n):xs)
+        _ -> (n, (EnumConstant ident maybeExpr):xs)
+processEnumMembers (n, xs) member = (n, member:xs)
+
 jsify :: Either Statement Expression -> CodeGen Doc
 jsify (Left ast) =
     case ast of
@@ -111,6 +118,9 @@ jsify (Left ast) =
             let body = indent 4 $ semiDocfold (<$$>) $ docs'
             return $ braces $ line <> body
         SJavascript js -> return $ text $ T.unpack js
+        SEnum ident members ->
+            let members' = foldr processEnumMembers (0.0, []) members
+            in  text "FAKE NO"
 
 jsify (Right ast) =
     case ast of
@@ -141,6 +151,9 @@ jsify (Right ast) =
             expr' <- jsifyExpression expr
             args' <- mapM jsifyExpression args
             return $ expr' <> (tupled args')
+        EIf cond yes no -> do
+            cond':yes':no':[] <- mapM jsifyExpression [cond, yes, no]
+            return $ hsep $ [text "if", parens cond', yes', text "else", no']
         EStatement (SBlock exprs) -> do
             exprs' <- mapM jsifyExpression exprs
             return $ tupled exprs'

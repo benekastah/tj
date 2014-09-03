@@ -1,11 +1,5 @@
 module TJ.Parser ( parseTJ
                  , parseTJFile
-                 , identName
-                 , Assignment(..)
-                 , Expression(..)
-                 , Identifier(..)
-                 , Operation(..)
-                 , Statement(..)
                  ) where
 
 import Control.Monad.Identity
@@ -19,50 +13,10 @@ import Text.Parsec.Expr
 import Text.Parsec.Prim
 import Text.Parsec.Text.Lazy
 
+import TJ.Ast
+
 type LanguageDef st = P.GenLanguageDef T.Text st Identity
 type TokenParser st = P.GenTokenParser T.Text st Identity
-
-newtype Identifier = Identifier T.Text
-                  deriving (Ord, Eq)
-
-identName (Identifier ident) = ident
-
-instance Show Identifier where
-    show (Identifier ident) = T.unpack ident
-
-type ParamList = [Identifier]
-type ArgList = [Expression]
-
-data Expression = EIdentifier Identifier
-                | ENumber Double
-                | EString T.Text
-                | EFunction (Maybe Identifier) ParamList Expression
-                | EBinOp Operation Expression Expression
-                | EApplication Expression ArgList
-                | EStatement Statement
-                  deriving (Show, Ord, Eq)
-
-data Operation = Add | Subtract | Divide | Multiply | Concat
-                 deriving (Ord, Eq)
-
-instance Show Operation where
-    show Add = "+"
-    show Subtract = "-"
-    show Divide = "/"
-    show Multiply = "*"
-    show Concat = "++"
-
-data Assignment = Let Identifier Expression
-                  deriving (Show, Ord, Eq)
-
-type Module = [Statement]
-
-data Statement = SAssignment Assignment
-               | SModule Module
-               | SReturn Expression
-               | SBlock [Expression]
-               | SJavascript T.Text
-                 deriving (Show, Ord, Eq)
 
 -- Utility parsers
 expr :: (a -> Expression) -> Parser a -> Parser Expression
@@ -81,7 +35,8 @@ tjLangDef = P.LanguageDef {
     P.identLetter    = alphaNum <|> oneOf "_'",
     P.opStart        = P.opLetter tjLangDef,
     P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~",
-    P.reservedNames  = ["let", "function", "javascript"],
+    P.reservedNames  = ["let", "function", "javascript", "if", "else", "elif",
+                        "enum"],
     P.reservedOpNames= [],
     P.caseSensitive  = True
     }
@@ -89,20 +44,66 @@ tjLangDef = P.LanguageDef {
 lexer :: TokenParser st
 lexer = P.makeTokenParser tjLangDef
 
-parens = P.parens lexer
 braces = P.braces lexer
-reserved = P.reserved lexer
-reservedOp = P.reservedOp lexer
 commaSep = P.commaSep lexer
 commaSep1 = P.commaSep1 lexer
+parens = P.parens lexer
+reserved = P.reserved lexer
+reservedOp = P.reservedOp lexer
 semi = P.semi lexer
+whiteSpace = P.whiteSpace lexer
+
+
+-- Parsing of type definitions
+typeIdentifier :: Parser Identifier
+typeIdentifier = do
+    ch <- upper
+    ident <- optionMaybe $ try $ P.identifier lexer
+    let name = case ident of
+                   Just s -> ch:s
+                   Nothing -> [ch]
+    return $ Identifier $ T.pack name
+
+typeAtom :: Parser Type
+typeAtom = do
+    ident <- typeIdentifier
+    types <- many typeRef
+    return $ TLabeled (identName ident) types
+
+typeRef = typeAtom <|> parens typeAtom
+
+enum :: Parser Statement
+enum = do
+    reserved "enum"
+    ident <- typeIdentifier
+    members <- braces $ enumMember `sepEndBy` semi
+    return $ SEnum ident members
+
+enumMember = do
+    ident <- typeIdentifier
+    assgn <- optionMaybe $ try $ reservedOp "="
+    case assgn of
+        Just _ -> do
+            expr <- expression
+            return $ EnumConstant ident $ Just expr
+        Nothing -> do
+            types <- optionMaybe $ try $ many1 typeRef
+            case types of
+                Just types' -> return $ EnumMember ident types'
+                Nothing -> return $ EnumConstant ident Nothing
+
+type' = enum
+
+-- Parsing of statements
+statement :: Parser Statement
+statement = sassignment <|> type'
 
 module' :: Parser Statement
 module' = do
-    spaces
-    ids <- assignment `sepEndBy` semi
+    whiteSpace
+    statements <- statement `sepEndBy` semi
     eof
-    return $ SModule $ map SAssignment ids
+    return $ SModule statements
 
 defun :: Parser Assignment
 defun = do
@@ -122,6 +123,12 @@ let' = do
 
 assignment = try let' <|> defun
 
+sassignment = do
+    a <- assignment
+    return $ SAssignment a
+
+
+-- Parsing of expressions
 function :: Parser Expression
 function = do
     reserved "function"
@@ -169,6 +176,17 @@ stringLiteral = do
     s <- P.stringLiteral lexer
     return $ EString $ T.pack s
 
+ifRec :: Parser () -> Parser Expression
+ifRec if' = do
+    if'
+    cond <- expression
+    yes <- expression
+    no <- (try $ do { reserved "else"; expression }) <|>
+          (try $ ifRec $ reserved "elif")
+    return $ EIf cond yes no
+
+ifexpr = ifRec $ reserved "if"
+
 atom :: Parser Expression
 atom = choice $ map try [ number
                         , stringLiteral
@@ -176,6 +194,7 @@ atom = choice $ map try [ number
                         , block
                         , jsblock
                         , parens expression
+                        , ifexpr
                         ]
 
 term :: Parser Expression

@@ -51,6 +51,7 @@ library
   exposed-modules:     TJ.Parser
                      , TJ.TypeChecker
                      , TJ.CodeGen
+                     , TJ.Ast
   
   -- Modules included in this library but not exported.
   -- other-modules:       
@@ -70,6 +71,8 @@ library
   
   -- Directories containing source files.
   hs-source-dirs:      lib
+
+  GHC-Options: -Wall
   
   -- Base language which the package is written in.
   default-language:    Haskell2010
@@ -95,6 +98,8 @@ executable tj
   
   -- Directories containing source files.
   hs-source-dirs:      exe
+
+  GHC-Options: -Wall
   
   -- Base language which the package is written in.
   default-language:    Haskell2010

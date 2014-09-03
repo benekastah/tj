@@ -10,10 +10,7 @@ import qualified Data.Set as Set
 import qualified Data.Text.Lazy as T
 
 import TJ.Parser
-
-data Type = TVariable Int
-          | TLabeled T.Text [Type]
-          deriving (Show, Eq, Ord)
+import TJ.Ast
 
 data Context = Context { env :: Map.Map Expression Type
                        , typeEnv :: Map.Map Type Type
@@ -25,9 +22,19 @@ data Context = Context { env :: Map.Map Expression Type
 
 type TypeChecker = State Context
 
+voidType :: Type
 voidType = TLabeled "Void" []
+
+numberType :: Type
 numberType = TLabeled "Number" []
+
+stringType :: Type
 stringType = TLabeled "String" []
+
+boolType :: Type
+boolType = TLabeled "Bool" []
+
+functionType :: [Type] -> Type -> Type
 functionType args ret = TLabeled "->" (ret:args)
 
 typeVar :: TypeChecker Type
@@ -48,58 +55,72 @@ scoped fn = do
     put $ ctx' { env = env', nonGeneric = nonGeneric' }
     return x
 
+errOrReturn :: [String] -> a -> TypeChecker a
 errOrReturn errs ret =
     case errs of
         [] -> return ret
         _ -> error $ unlines errs
 
 analyse :: Either Statement Expression -> TypeChecker Type
-analyse node =
+analyse (Left node) =
     case node of
-        Left (SAssignment (Let ident expr)) -> do
+        SAssignment (Let ident expr) -> do
             t <- analyse $ Right expr
             ctx <- get
             put ctx { env = Map.insert (EIdentifier ident) t (env ctx)}
             return t
-        Left (SModule mod) -> do
+        SModule mod -> do
             t <- mapM analyse $ map Left mod
             return $ TLabeled "Module" t
-        Left (SBlock exprs) -> scoped (do
+        SBlock exprs -> scoped (do
             types <- mapM analyse $ map Right exprs
             return $ last (voidType:types)
             )
-        Left (SJavascript js) -> do
+        SJavascript js -> do
             tvar <- typeVar
             return tvar
-        Right e -> case e of
-            EIdentifier ident -> getType e
-            EApplication fn args -> do
-                fnT <- analyse $ Right fn
-                argTypes <- mapM (analyse . Right) args
-                retT <- typeVar
-                errs <- unify (functionType argTypes retT) fnT
-                errOrReturn errs retT
-            EBinOp op e1 e2 -> do
-                let args = [e1, e2]
-                argTypes <- mapM getType args
-                retT <- typeVar
-                errs <- unify (functionType argTypes retT) (opType op)
-                errOrReturn errs retT
-            EFunction _ args expr -> scoped (do
-                argTypes <- typeVars args
-                ctx <- get
-                put $ ctx { env = foldr (\(a, t) env' -> Map.insert a t env')
-                                        (env ctx)
-                                        (zip (map EIdentifier args) argTypes)
-                          , nonGeneric = Set.union (nonGeneric ctx)
-                                                   (Set.fromList argTypes)
-                          }
-                retT <- analyse $ Right expr
-                return $ functionType argTypes retT
-                )
-            EStatement s -> analyse (Left s)
-            _ -> getType e
 
+analyse (Right e) =
+    case e of
+        EIdentifier _ -> getType e
+        EApplication fn args -> do
+            fnT <- analyse $ Right fn
+            argTypes <- mapM (analyse . Right) args
+            retT <- typeVar
+            errs <- unify (functionType argTypes retT) fnT
+            errOrReturn errs retT
+        EBinOp op e1 e2 -> do
+            let args = [e1, e2]
+            argTypes <- mapM getType args
+            retT <- typeVar
+            errs <- unify (functionType argTypes retT) (opType op)
+            errOrReturn errs retT
+        EFunction _ args expr -> scoped (do
+            argTypes <- typeVars args
+            ctx <- get
+            put $ ctx { env = foldr (\(a, t) env' -> Map.insert a t env')
+                                    (env ctx)
+                                    (zip (map EIdentifier args) argTypes)
+                      , nonGeneric = Set.union (nonGeneric ctx)
+                                               (Set.fromList argTypes)
+                      }
+            retT <- analyse $ Right expr
+            return $ functionType argTypes retT
+            )
+        EIf cond yes no -> do
+            condT <- analyse $ Right cond
+            yesT <- analyse $ Right yes
+            noT <- analyse $ Right no
+            resultT <- typeVar
+            errs <- mapM (\(a, b) -> unify a b) [ (condT, boolType)
+                                                , (resultT, yesT)
+                                                , (resultT, noT) ]
+            errOrReturn (foldr (++) [] errs) resultT
+        EStatement s -> analyse (Left s)
+        ENumber _ -> getType e
+        EString _ -> getType e
+
+numericBinOp :: Type
 numericBinOp = functionType [numberType, numberType] numberType
 
 opType :: Operation -> Type
@@ -206,6 +227,7 @@ unify t1 t2 = do
                         return $! concat r
             _ -> unify p2 p1
 
+emptyContext :: Context
 emptyContext = Context { env = Map.empty
                        , typeEnv = Map.empty
                        , nonGeneric = Set.empty
@@ -216,6 +238,8 @@ emptyContext = Context { env = Map.empty
 check :: Either Statement Expression -> Type
 check ast = evalState (analyse ast) emptyContext
 
+checkStatement :: Type
 checkStatement = check . Left
 
+checkExpression :: Type
 checkExpression = check . Right

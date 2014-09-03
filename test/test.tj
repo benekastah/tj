@@ -1,9 +1,18 @@
 
+enum Bool {
+    True = javascript { true };
+    False = javascript { false };
+};
+
 function log(a) {
     javascript { console.log(a) }
 };
 
 function add(a, b) a + b;
+
+// function ifTest() {
+//     console.log(if (javascript { true }) 5 else 6);
+// }
 
 function main() {
     let a = {
