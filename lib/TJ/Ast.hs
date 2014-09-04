@@ -12,7 +12,8 @@ module TJ.Ast ( Assignment(..)
 
 import qualified Data.Text.Lazy as T
 
-newtype Identifier = Identifier T.Text
+data Identifier = Identifier T.Text
+                | IdentifierTyped Identifier Type
                   deriving (Ord, Eq)
 
 identName :: Identifier -> T.Text
@@ -20,6 +21,7 @@ identName (Identifier ident) = ident
 
 instance Show Identifier where
     show (Identifier ident) = T.unpack ident
+    show (IdentifierTyped ident t) = show ident
 
 type ParamList = [Identifier]
 type ArgList = [Expression]
@@ -32,6 +34,7 @@ data Expression = EIdentifier Identifier
                 | EApplication Expression ArgList
                 | EIf Expression Expression Expression
                 | EStatement Statement
+                | ETyped Expression Type
                   deriving (Show, Ord, Eq)
 
 data Operation = Add | Subtract | Divide | Multiply | Concat

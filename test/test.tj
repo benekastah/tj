@@ -8,7 +8,9 @@ function log(a) {
     javascript { console.log(a) }
 };
 
-function add(a, b) a + b;
+function TRUE() true;
+
+function add(a: Number, b: Number) -> Number a + b;
 
 // function ifTest() {
 //     console.log(if (javascript { true }) 5 else 6);
@@ -19,6 +21,6 @@ function main() {
         let b = 1 + 5;
         b * 4;
     };
-    log(add(a, 5));
-    log("6" ++ "7");
+    log(id(add(a, 5)));
+    log(True ++ "6");
 };

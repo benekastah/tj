@@ -9,7 +9,6 @@ import qualified Data.Set as Set
 
 import qualified Data.Text.Lazy as T
 
-import TJ.Parser
 import TJ.Ast
 
 data Context = Context { env :: Map.Map Expression Type
@@ -55,6 +54,10 @@ scoped fn = do
     put $ ctx' { env = env', nonGeneric = nonGeneric' }
     return x
 
+simpleIdentifier :: Identifier -> Identifier
+simpleIdentifier (IdentifierTyped ident _) = simpleIdentifier ident
+simpleIdentifier ident = ident
+
 errOrReturn :: [String] -> a -> TypeChecker a
 errOrReturn errs ret =
     case errs of
@@ -67,21 +70,37 @@ analyse (Left node) =
         SAssignment (Let ident expr) -> do
             t <- analyse $ Right expr
             ctx <- get
-            put ctx { env = Map.insert (EIdentifier ident) t (env ctx)}
+            let ident' = simpleIdentifier ident
+            put ctx { env = Map.insert (EIdentifier ident') t (env ctx)}
             return t
-        SModule mod -> do
-            t <- mapM analyse $ map Left mod
+        SModule mod' -> do
+            t <- mapM analyse $ map Left mod'
             return $ TLabeled "Module" t
         SBlock exprs -> scoped (do
             types <- mapM analyse $ map Right exprs
             return $ last (voidType:types)
             )
-        SJavascript js -> do
+        SJavascript _ -> do
             tvar <- typeVar
             return tvar
+        SReturn _ -> error "Unreachable"
+        SEnum enumIdent ((EnumConstant ident _):xs) -> do
+            ctx <- get
+            t <- analyse $ Left $ SEnum enumIdent xs
+            put ctx { env = Map.insert (EIdentifier ident) t (env ctx) }
+            return t
+        SEnum enumIdent ((EnumMember ident types):xs) -> do
+            ctx <- get
+            t <- analyse $ Left $ SEnum enumIdent xs
+            let fT = functionType types t
+            put ctx { env = Map.insert (EIdentifier ident) fT (env ctx) }
+            return t
+        SEnum enumIdent [] -> return $ TLabeled (identName enumIdent) []
 
 analyse (Right e) =
     case e of
+        EIdentifier (IdentifierTyped ident t) ->
+            analyse $ Right $ ETyped (EIdentifier ident) t
         EIdentifier _ -> getType e
         EApplication fn args -> do
             fnT <- analyse $ Right fn
@@ -96,16 +115,18 @@ analyse (Right e) =
             errs <- unify (functionType argTypes retT) (opType op)
             errOrReturn errs retT
         EFunction _ args expr -> scoped (do
+            let simpleArgs = map simpleIdentifier args
             argTypes <- typeVars args
             ctx <- get
             put $ ctx { env = foldr (\(a, t) env' -> Map.insert a t env')
                                     (env ctx)
-                                    (zip (map EIdentifier args) argTypes)
+                                    (zip (map EIdentifier simpleArgs) argTypes)
                       , nonGeneric = Set.union (nonGeneric ctx)
                                                (Set.fromList argTypes)
                       }
+            argTypes' <- mapM (analyse . Right) (map EIdentifier args)
             retT <- analyse $ Right expr
-            return $ functionType argTypes retT
+            return $ functionType argTypes' retT
             )
         EIf cond yes no -> do
             condT <- analyse $ Right cond
@@ -116,6 +137,10 @@ analyse (Right e) =
                                                 , (resultT, yesT)
                                                 , (resultT, noT) ]
             errOrReturn (foldr (++) [] errs) resultT
+        ETyped expr t -> do
+            eT <- analyse $ Right expr
+            errs <- unify eT t
+            errOrReturn errs t
         EStatement s -> analyse (Left s)
         ENumber _ -> getType e
         EString _ -> getType e
@@ -198,7 +223,7 @@ occursInType t1 t2 = do
     if p2 == t1
         then return True
         else case p2 of
-            TLabeled name types -> occursIn types t1
+            TLabeled _ types -> occursIn types t1
             _ -> return False
 
 unify :: Type -> Type -> TypeChecker [String]
@@ -206,7 +231,7 @@ unify t1 t2 = do
     p1 <- prune t1
     p2 <- prune t2
     case p1 of
-        TVariable n -> do
+        TVariable _ -> do
             if p1 /= p2
                 then do
                     occurs <- occursInType p1 p2
@@ -238,8 +263,8 @@ emptyContext = Context { env = Map.empty
 check :: Either Statement Expression -> Type
 check ast = evalState (analyse ast) emptyContext
 
-checkStatement :: Type
+checkStatement :: Statement -> Type
 checkStatement = check . Left
 
-checkExpression :: Type
+checkExpression :: Expression -> Type
 checkExpression = check . Right

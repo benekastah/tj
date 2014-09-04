@@ -70,7 +70,17 @@ typeAtom = do
     types <- many typeRef
     return $ TLabeled (identName ident) types
 
+typeRef :: Parser Type
 typeRef = typeAtom <|> parens typeAtom
+
+typeAnnotation :: Parser p -> Parser Type
+typeAnnotation op = do { op; typeRef }
+
+exprTypeAnnotation :: Parser Type
+exprTypeAnnotation = typeAnnotation $ reservedOp ":"
+
+funcTypeAnnotation :: Parser Type
+funcTypeAnnotation = typeAnnotation $ reservedOp "->"
 
 enum :: Parser Statement
 enum = do
@@ -109,17 +119,19 @@ defun :: Parser Assignment
 defun = do
     reserved "function"
     name <- identifier
-    params <- paramList
-    expr <- expression
-    return $ Let name $ EFunction (Just name) params expr
+    fn <- functionEnd
+    return $ Let name fn
 
 let' :: Parser Assignment
 let' = do
     reserved "let"
     id <- identifier
+    mT <- optionMaybe $ try exprTypeAnnotation
     reservedOp "="
     expr <- expression
-    return $ Let id expr
+    return $ Let id $ case mT of
+        Just t -> ETyped expr t
+        Nothing -> expr
 
 assignment = try let' <|> defun
 
@@ -129,15 +141,30 @@ sassignment = do
 
 
 -- Parsing of expressions
+functionEnd :: Parser Expression
+functionEnd = do
+    params <- paramList
+    mT <- optionMaybe $ try funcTypeAnnotation
+    expr <- expression
+    return $ EFunction Nothing params $ case mT of
+        Just t -> ETyped expr t
+        Nothing -> expr
+
 function :: Parser Expression
 function = do
     reserved "function"
-    params <- paramList
-    expr <- expression
-    return $ EFunction Nothing params expr
+    functionEnd
+
+typedIdentifier :: Parser Identifier
+typedIdentifier = do
+    ident <- identifier
+    mT <- optionMaybe $ try exprTypeAnnotation
+    return $ case mT of
+        Just t -> IdentifierTyped ident t
+        Nothing -> ident
 
 paramList :: Parser ParamList
-paramList = parens $ commaSep identifier
+paramList = parens $ commaSep typedIdentifier
 
 argList :: Parser ArgList
 argList = parens $ commaSep expression
@@ -187,15 +214,23 @@ ifRec if' = do
 
 ifexpr = ifRec $ reserved "if"
 
+maybeTyped :: Parser Expression -> Parser Expression
+maybeTyped expr = do
+    result <- expr
+    mT <- optionMaybe $ try exprTypeAnnotation
+    return $ case mT of
+        Just t -> ETyped result t
+        Nothing -> result
+
 atom :: Parser Expression
-atom = choice $ map try [ number
-                        , stringLiteral
-                        , eidentifier
-                        , block
-                        , jsblock
-                        , parens expression
-                        , ifexpr
-                        ]
+atom = choice $ map (try . maybeTyped) [ number
+                                       , stringLiteral
+                                       , eidentifier
+                                       , block
+                                       , jsblock
+                                       , parens expression
+                                       , ifexpr
+                                       ]
 
 term :: Parser Expression
 term = choice $ map try [ application

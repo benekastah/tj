@@ -20,6 +20,7 @@ type CodeGen = State Context
 
 docfold op docs = foldr op empty docs
 
+semiDocfold :: (Doc -> Doc -> Doc) -> [Doc] -> Doc
 semiDocfold op docs = docfold op $ map (<> semi) docs
 
 mapLast fn [] = []
@@ -83,12 +84,20 @@ renameIdent ident n = do
             return ident'
         else renameIdent ident (n + 1)
 
-processEnumMembers (n, xs) (EnumConstant ident maybeExpr) =
+processEnumMember :: EnumMember -> (Double, [Statement]) -> (Double, [Statement])
+processEnumMember (EnumConstant ident maybeExpr) (n, xs) =
     case maybeExpr of
-        Just $ ENumber n' -> (n' + 1.0, (EnumConstant ident maybeExpr):xs)
-        Nothing -> (n + 1.0, (EnumConstant ident $ Just $ ENumber n):xs)
-        _ -> (n, (EnumConstant ident maybeExpr):xs)
-processEnumMembers (n, xs) member = (n, member:xs)
+        Just (ENumber n') ->
+            processEnumMember (EnumConstant ident $ Just $ ENumber n')
+                              (n' + 1.0, xs)
+        Nothing ->
+            processEnumMember (EnumConstant ident $ Just $ ENumber n) (n, xs)
+        Just expr -> (n, (SAssignment $ Let ident expr):xs)
+
+processEnumMember (EnumMember ident types) (n, xs) = (n, st:xs)
+    where fn = EFunction (Just ident) [] $ EStatement $
+                         SJavascript "[].slice.call(arguments)"
+          st = SAssignment $ Let ident fn
 
 jsify :: Either Statement Expression -> CodeGen Doc
 jsify (Left ast) =
@@ -96,8 +105,8 @@ jsify (Left ast) =
         SAssignment assgn -> assignment True assgn
         SModule mod -> scoped $ do
             mod' <- mapM jsifyStatement mod
-            let callMain = text "typeof main === 'function' && main();"
-            return $ (semiDocfold (<$$>) mod') <$$> callMain
+            let callMain = text "typeof main === 'function' && main()"
+            return $ (semiDocfold (<$$>) (mod' ++ [callMain]))
         SReturn expr -> do
             expr' <- jsifyExpression expr
             return $ text "return" <+> expr'
@@ -115,12 +124,13 @@ jsify (Left ast) =
                 else docs
             put $ ctx { dumpVars = False }
 
-            let body = indent 4 $ semiDocfold (<$$>) $ docs'
+            let body = indent 4 $ semiDocfold (<$$>) docs'
             return $ braces $ line <> body
         SJavascript js -> return $ text $ T.unpack js
-        SEnum ident members ->
-            let members' = foldr processEnumMembers (0.0, []) members
-            in  text "FAKE NO"
+        SEnum ident mems -> do
+            let (_, st) = foldr processEnumMember (0, []) mems
+            stDocs <- mapM jsifyStatement st
+            return $ semiDocfold (<$$>) stDocs
 
 jsify (Right ast) =
     case ast of
@@ -154,6 +164,7 @@ jsify (Right ast) =
         EIf cond yes no -> do
             cond':yes':no':[] <- mapM jsifyExpression [cond, yes, no]
             return $ hsep $ [text "if", parens cond', yes', text "else", no']
+        ETyped expr _ -> jsifyExpression expr
         EStatement (SBlock exprs) -> do
             exprs' <- mapM jsifyExpression exprs
             return $ tupled exprs'
