@@ -126,7 +126,7 @@ jsify (Left ast) =
 
             let body = indent 4 $ semiDocfold (<$$>) docs'
             return $ braces $ line <> body
-        SJavascript js -> return $ text $ T.unpack js
+        SJavascript js -> return $ text $ T.unpack $ T.strip js
         SEnum ident mems -> do
             let (_, st) = foldr processEnumMember (0, []) mems
             stDocs <- mapM jsifyStatement st

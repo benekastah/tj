@@ -4,23 +4,20 @@ enum Bool {
     False = javascript { false };
 };
 
+enum Option {
+    Some(Number);
+    None = javascript { null };
+};
+
 function log(a) {
     javascript { console.log(a) }
 };
 
-function TRUE() true;
-
-function add(a: Number, b: Number) -> Number a + b;
-
-// function ifTest() {
-//     console.log(if (javascript { true }) 5 else 6);
-// }
+function id(x) x;
 
 function main() {
-    let a = {
-        let b = 1 + 5;
-        b * 4;
-    };
-    log(id(add(a, 5)));
-    log(True ++ "6");
+    log(None);
+    log(False);
+    log(Some(5));
+    // log(True);
 };

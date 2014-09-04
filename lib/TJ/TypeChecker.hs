@@ -36,6 +36,9 @@ boolType = TLabeled "Bool" []
 functionType :: [Type] -> Type -> Type
 functionType args ret = TLabeled "->" (ret:args)
 
+enumType :: Identifier -> Type
+enumType ident = TLabeled (identName ident) []
+
 typeVar :: TypeChecker Type
 typeVar = do
     ctx <- get
@@ -83,19 +86,19 @@ analyse (Left node) =
         SJavascript _ -> do
             tvar <- typeVar
             return tvar
-        SReturn _ -> error "Unreachable"
         SEnum enumIdent ((EnumConstant ident _):xs) -> do
             ctx <- get
-            t <- analyse $ Left $ SEnum enumIdent xs
+            let t = enumType enumIdent
             put ctx { env = Map.insert (EIdentifier ident) t (env ctx) }
-            return t
+            analyse $ Left $ SEnum enumIdent xs
         SEnum enumIdent ((EnumMember ident types):xs) -> do
             ctx <- get
-            t <- analyse $ Left $ SEnum enumIdent xs
+            let t = enumType enumIdent
             let fT = functionType types t
             put ctx { env = Map.insert (EIdentifier ident) fT (env ctx) }
-            return t
-        SEnum enumIdent [] -> return $ TLabeled (identName enumIdent) []
+            analyse $ Left $ SEnum enumIdent xs
+        SEnum enumIdent [] -> return $ enumType enumIdent
+        SReturn _ -> error "Unreachable: SReturn should not be generated from the parser"
 
 analyse (Right e) =
     case e of
@@ -140,7 +143,7 @@ analyse (Right e) =
         ETyped expr t -> do
             eT <- analyse $ Right expr
             errs <- unify eT t
-            errOrReturn errs t
+            errOrReturn errs eT
         EStatement s -> analyse (Left s)
         ENumber _ -> getType e
         EString _ -> getType e
